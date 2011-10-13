@@ -1,0 +1,25 @@
+nohup: ignoring input
+*** glibc detected *** errorTesting_free_error: free(): invalid pointer: 0xbff3c8bb ***
+======= Backtrace: =========
+/lib/libc.so.6[0xb7e6a8c4]
+/lib/libc.so.6(cfree+0x90)[0xb7e6e370]
+errorTesting_free_error[0x80483c5]
+errorTesting_free_error[0x804841f]
+/lib/libc.so.6(__libc_start_main+0xe0)[0xb7e15390]
+errorTesting_free_error[0x8048351]
+======= Memory map: ========
+08048000-08049000 r-xp 00000000 03:03 559003     /data/workdir/lixd/code/tempCode/errorTesting_free_error
+08049000-0804a000 rw-p 00000000 03:03 559003     /data/workdir/lixd/code/tempCode/errorTesting_free_error
+0804a000-0806b000 rw-p 0804a000 00:00 0          [heap]
+b7dfe000-b7dff000 rw-p b7dfe000 00:00 0 
+b7dff000-b7f45000 r-xp 00000000 03:01 148524     /lib/libc-2.7.so
+b7f45000-b7f46000 r--p 00146000 03:01 148524     /lib/libc-2.7.so
+b7f46000-b7f48000 rw-p 00147000 03:01 148524     /lib/libc-2.7.so
+b7f48000-b7f4b000 rw-p b7f48000 00:00 0 
+b7f55000-b7f5f000 r-xp 00000000 03:01 895933     /usr/lib/libgcc_s.so.1
+b7f5f000-b7f60000 rw-p 00009000 03:01 895933     /usr/lib/libgcc_s.so.1
+b7f60000-b7f62000 rw-p b7f60000 00:00 0 
+b7f62000-b7f7e000 r-xp 00000000 03:01 148564     /lib/ld-2.7.so
+b7f7e000-b7f80000 rw-p 0001b000 03:01 148564     /lib/ld-2.7.so
+bff29000-bff3e000 rw-p bffeb000 00:00 0          [stack]
+ffffe000-fffff000 r-xp 00000000 00:00 0          [vdso]
